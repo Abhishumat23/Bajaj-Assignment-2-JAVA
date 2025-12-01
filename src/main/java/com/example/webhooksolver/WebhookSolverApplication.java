@@ -55,23 +55,26 @@ public class WebhookSolverApplication {
             }
 
             // Compose final SQL (PostgreSQL-style) that solves the problem
-            String finalQuery = "SELECT d.department_name,\n" +
-                    "       ROUND(AVG(emp_age)::numeric,2) AS average_age,\n" +
-                    "       (SELECT STRING_AGG(name, ', ') FROM (\n" +
-                    "            SELECT CONCAT(e2.first_name,' ',e2.last_name) AS name\n" +
-                    "            FROM employee e2\n" +
-                    "            WHERE e2.emp_id IN (SELECT p3.emp_id FROM payments p3 WHERE p3.amount > 70000)\n" +
-                    "              AND e2.department = d.department_id\n" +
-                    "            ORDER BY e2.emp_id\n" +
-                    "            LIMIT 10\n" +
-                    "        ) t) AS employee_list\n" +
+            String finalQuery = "WITH high_earners AS (\n" +
+                    "    SELECT DISTINCT e.emp_id, e.first_name, e.last_name, e.dob, e.department\n" +
+                    "    FROM employee e\n" +
+                    "    JOIN payments p ON e.emp_id = p.emp_id\n" +
+                    "    WHERE p.amount > 70000\n" +
+                    ")\n" +
+                    "SELECT d.department_name,\n" +
+                    "       ROUND(AVG(EXTRACT(YEAR FROM AGE(CURRENT_DATE, he.dob)))::numeric, 2) AS average_age,\n" +
+                    "       (\n" +
+                    "           SELECT STRING_AGG(name, ', ')\n" +
+                    "           FROM (\n" +
+                    "               SELECT CONCAT(he2.first_name, ' ', he2.last_name) AS name\n" +
+                    "               FROM high_earners he2\n" +
+                    "               WHERE he2.department = d.department_id\n" +
+                    "               ORDER BY he2.emp_id\n" +
+                    "               LIMIT 10\n" +
+                    "           ) names\n" +
+                    "       ) AS employee_list\n" +
                     "FROM department d\n" +
-                    "JOIN (\n" +
-                    "   SELECT e.emp_id, e.department,\n" +
-                    "          EXTRACT(year FROM AGE(CURRENT_DATE, e.dob)) AS emp_age\n" +
-                    "   FROM employee e\n" +
-                    "   WHERE e.emp_id IN (SELECT p.emp_id FROM payments p WHERE p.amount > 70000)\n" +
-                    ") emp ON emp.department = d.department_id\n" +
+                    "JOIN high_earners he ON d.department_id = he.department\n" +
                     "GROUP BY d.department_id, d.department_name\n" +
                     "ORDER BY d.department_id DESC;";
 
@@ -87,8 +90,8 @@ public class WebhookSolverApplication {
                 System.err.println("Failed to write solution.sql: " + ex.getMessage());
             }
 
-            // Send final SQL to returned webhook URL
-            String testWebhookUrl = response.getWebhook();
+            // Send final SQL to testWebhook endpoint
+            String testWebhookUrl = "https://bfhldevapigw.healthrx.co.in/hiring/testWebhook/JAVA";
             HttpHeaders postHeaders = new HttpHeaders();
             postHeaders.setContentType(MediaType.APPLICATION_JSON);
             // Use accessToken as-is in Authorization header as per instructions
